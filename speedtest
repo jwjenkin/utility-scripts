@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Uses single source to test against, should expand in future
+numfmt --to=iec <<< $(curl -qfsS -w "%{speed_download}\n" -o /dev/null http://speedtest.wdc01.softlayer.com/downloads/test${1:-10}.zip)
