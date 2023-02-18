@@ -1,0 +1,72 @@
+#!/bin/bash
+KEY="$OPNSENSE_KEY"
+SECRET="$OPNSENSE_SECRET"
+HOST="${OPNSENSE_HOST:-https://192.168.1.1}"
+MAIN_API_ENDPOINT="api/unbound"
+IS_ENABLED=${1:-1}
+
+#
+# Generic request function to handle API requests
+#
+_do_request() {
+  URI="$MAIN_API_ENDPOINT$1"
+  TYPE=${2:-GET}
+  DATA=$3
+
+  MAIN_PARAMS=$(cat <<EOF
+        --silent \
+	-u $KEY:$SECRET \
+
+EOF
+)
+
+  # lazy-man's curl: get is simple, everything else needs other stuff
+  if [ "GET" = "$TYPE" ]; then
+    curl $MAIN_PARAMS $HOST/$URI
+  else
+    curl $MAIN_PARAMS \
+	 -X $TYPE \
+	 -H "Content-Type: application/json" \
+	 -d "$DATA" \
+	 $HOST/$URI
+  fi
+}
+
+# first, check if already set to given state
+CURRENT_SETTING=$(_do_request "/settings/get" | jq -r '.unbound.dnsbl.enabled')
+if [ "$CURRENT_SETTING" = "$IS_ENABLED" ]; then
+  echo "Unbound Blocklist enabled already set to $IS_ENABLED"
+  exit 0
+fi
+
+# next, update setting to enabled / disabled
+PAYLOAD=$(cat <<EOF
+{
+  "unbound": {
+    "dnsbl": {
+      "enabled": "$IS_ENABLED"
+    }
+  }
+}
+EOF
+)
+SETTING_RESULT=$(_do_request "/settings/set" "POST" "$PAYLOAD" | jq -r '.result')
+
+# if failure occured, exit
+if [ 'saved' != "$SETTING_RESULT" ]; then
+  echo $SETTING_RESULT
+  exit 1
+fi
+
+# finally, "apply" dnsbl
+echo "Applying changes. Note, this can take 30+ seconds to complete."
+DNSBL_RESULT=$(_do_request "/service/dnsbl" "POST" "{}" | jq -r '.status')
+
+# if failure occured, exit
+if [ "OK" != "$DNSBL_RESULT" ]; then
+  echo $DNSBL_RESULT
+  exit 1
+fi
+
+echo "Updated the Unbound Blocklist to $IS_ENABLED"
+exit 0
