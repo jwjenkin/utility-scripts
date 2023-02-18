@@ -1,0 +1,9 @@
+#!/bin/bash
+IP=$(/usr/bin/dig -4 +timeout=5 +short myip.opendns.com @resolver1.opendns.com)
+NOTIFICATION="Current IP: $IP"
+
+if [ $(which zenity) ]; then
+  zenity --notification --text "$NOTIFICATION"
+else
+  echo $NOTIFICATION
+fi
