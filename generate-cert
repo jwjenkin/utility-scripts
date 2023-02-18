@@ -1,0 +1,81 @@
+#!/bin/bash
+
+##########################################################
+# NOTE: specific to nginx, and obviously root required
+##########################################################
+# This script will generate a new sef-signed domain 
+# certificate, signed by the given custom CA, and
+# automatically test nginx and reload the service
+# (expects that correct cert params are already in config)
+##########################################################
+
+CA="$CUSTOM_CA_LOCATION"
+CA_KEY="$CUSTOM_CA_KEY_LOCATION"
+ORGANIZATION="Some Organization"
+DOMAIN=$1
+DIRECTORY="/certs/$DOMAIN"
+
+# 0. create domain dir if necessary
+if [ ! -d $DIRECTORY ]; then
+  echo "Creating new cert folder for $DOMAIN"
+  sudo mkdir $DIRECTORY
+fi
+
+# 1. create new domain key
+sudo openssl genrsa -out $DIRECTORY/privatekey.pem 4096
+
+# 2. create host config
+echo "
+[req]
+default_md = sha512
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+[req]
+distinguished_name = req_distinguished_name
+prompt = no
+[req_distinguished_name]
+C   = US
+ST  = Some-State
+L   = Some-City
+O   = $ORGANIZATION
+OU  = IT
+CN  = $DOMAIN
+" | sudo tee $DIRECTORY/host.conf
+
+# 3. generate domain CSR
+sudo openssl req \
+  -new \
+  -sha512 \
+  -nodes \
+  -key $DIRECTORY/privatekey.pem \
+  -out $DIRECTORY/host.csr \
+  -config $DIRECTORY/host.conf
+
+# 4. create domain-specific config
+echo "
+basicConstraints = CA:FALSE
+nsCertType = server
+nsComment = $DOMAIN-cert
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = $DOMAIN
+" | sudo tee $DIRECTORY/host-ext.conf
+
+# 5. generate domain certificate
+sudo openssl x509 \
+  -req \
+  -sha512 \
+  -days 365 \
+  -in $DIRECTORY/host.csr \
+  -CA $CA \
+  -CAkey $CA_KEY \
+  -CAcreateserial \
+  -out $DIRECTORY/certificate.pem \
+  -extfile $DIRECTORY/host-ext.conf
+
+# 6. reload nginx (after testing)
+sudo nginx -t && sudo nginx -s reload
